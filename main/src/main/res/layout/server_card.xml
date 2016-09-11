@@ -184,14 +184,18 @@
                 android:layout_toStartOf="@id/connect_timeout"
                 android:layout_below="@id/connect_timeout_label" />
 
-
+            <CheckBox
+                android:id="@+id/use_ssltunnel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_below="@id/connect_timeout"
+                android:text="@string/use_ssltunnel" />
 
             <CheckBox
                 android:id="@+id/use_customoptions"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_below="@id/connect_timeout"
-                android:paddingTop="10dp"
+                android:layout_below="@id/use_ssltunnel"
                 android:text="@string/custom_connection_options" />
 
             <LinearLayout

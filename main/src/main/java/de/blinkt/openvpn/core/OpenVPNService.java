@@ -30,6 +30,7 @@ import android.preference.PreferenceManager;
 import android.system.OsConstants;
 import android.text.TextUtils;
 import android.util.Log;
+import android.util.SparseArray;
 import android.widget.Toast;
 
 import java.io.IOException;
@@ -37,8 +38,11 @@ import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.net.Inet6Address;
 import java.net.InetAddress;
+import java.net.ServerSocket;
 import java.net.UnknownHostException;
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.List;
 import java.util.Locale;
 import java.util.Vector;
 
@@ -50,6 +54,7 @@ import de.blinkt.openvpn.activities.LogWindow;
 import de.blinkt.openvpn.core.VpnStatus.ByteCountListener;
 import de.blinkt.openvpn.core.VpnStatus.ConnectionStatus;
 import de.blinkt.openvpn.core.VpnStatus.StateListener;
+import de.blinkt.openvpn.core.tunnel.SSLTunnelThread;
 
 import static de.blinkt.openvpn.core.NetworkSpace.ipAddress;
 import static de.blinkt.openvpn.core.VpnStatus.ConnectionStatus.LEVEL_CONNECTED;
@@ -86,6 +91,7 @@ public class OpenVPNService extends VpnService implements StateListener, Callbac
     private Handler guiHandler;
     private Toast mlastToast;
     private Runnable mOpenVPNThread;
+    private Thread mTunnelThread;
 
     // From: http://stackoverflow.com/questions/3758606/how-to-convert-byte-size-into-human-readable-format-in-java
     public static String humanReadableByteCount(long bytes, boolean mbit) {
@@ -369,7 +375,7 @@ public class OpenVPNService extends VpnService implements StateListener, Callbac
                 Log.d("OpenVPN", "Got no last connected profile on null intent. Assuming always on.");
                 mProfile = ProfileManager.getAlwaysOnVPN(this);
 
-                if (mProfile==null) {
+                if (mProfile == null) {
                     stopSelf(startId);
                     return START_NOT_STICKY;
                 }
@@ -399,10 +405,50 @@ public class OpenVPNService extends VpnService implements StateListener, Callbac
         return START_STICKY;
     }
 
-    private void startOpenVPN() {
+    private List<SSLTunnelThread> tunnels = new ArrayList<>();
+
+    public void stopTunnels() {
+        for (SSLTunnelThread tunnel : tunnels) {
+            try {
+                tunnel.mTunnel.close();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+        tunnels.clear();
+    }
+
+    private int findOpenPort() {
+        try {
+            ServerSocket tmp = new ServerSocket(0);
+            int port = tmp.getLocalPort();
+            tmp.close();
+            return port;
+        } catch (IOException e) {
+            return -1;
+        }
+    }
+
+    public void startOpenVPN() {
+        stopTunnels();
+        for (int i = 0; i < mProfile.mConnections.length; i++) {
+            Connection conn = mProfile.mConnections[i];
+            if (conn.mUseSSLTunnel) {
+                int port = findOpenPort();
+                SSLTunnelThread thread = new SSLTunnelThread(this, port, conn.mServerName, Integer.valueOf(conn.mServerPort));
+                tunnels.add(thread);
+
+                try {
+                    conn.mTunAddress = InetAddress.getLocalHost().getHostAddress();
+                    conn.mTunPort = String.valueOf(port);
+                } catch (UnknownHostException e) {
+                    e.printStackTrace();
+                }
+            }
+        }
+
         VpnStatus.logInfo(R.string.building_configration);
         VpnStatus.updateStateString("VPN_GENERATE_CONFIG", "", R.string.building_configration, VpnStatus.ConnectionStatus.LEVEL_START);
-
 
         try {
             mProfile.writeConfigFile(this);
@@ -428,6 +474,11 @@ public class OpenVPNService extends VpnService implements StateListener, Callbac
         // An old running VPN should now be exited
         mStarting = false;
 
+        // Run tunnels, if any
+        for (Thread tunnel : tunnels) {
+            tunnel.start();
+        }
+
         // Start a new session by creating a new thread.
         SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(this);
 
@@ -452,43 +503,38 @@ public class OpenVPNService extends VpnService implements StateListener, Callbac
         }
 
         Runnable processThread;
-        if (mOvpn3)
-
-        {
+        if (mOvpn3) {
 
             OpenVPNManagement mOpenVPN3 = instantiateOpenVPN3Core();
             processThread = (Runnable) mOpenVPN3;
             mManagement = mOpenVPN3;
-
 
         } else {
             processThread = new OpenVPNThread(this, argv, nativeLibraryDirectory);
             mOpenVPNThread = processThread;
         }
 
-        synchronized (mProcessLock)
-
-        {
+        synchronized (mProcessLock) {
             mProcessThread = new Thread(processThread, "OpenVPNProcessThread");
             mProcessThread.start();
         }
 
         new Handler(getMainLooper()).post(new Runnable() {
-                         @Override
-                         public void run() {
-                             if (mDeviceStateReceiver != null)
-                                 unregisterDeviceStateReceiver();
+                                              @Override
+                                              public void run() {
+                                                  if (mDeviceStateReceiver != null)
+                                                      unregisterDeviceStateReceiver();
 
-                             registerDeviceStateReceiver(mManagement);
-                         }
-                     }
+                                                  registerDeviceStateReceiver(mManagement);
+                                              }
+                                          }
 
-                );
+        );
     }
 
     private void stopOldOpenVPNProcess() {
         if (mManagement != null) {
-            if (mOpenVPNThread!=null)
+            if (mOpenVPNThread != null)
                 ((OpenVPNThread) mOpenVPNThread).setReplaceConnection();
             if (mManagement.stopVPN(true)) {
                 // an old was asked to exit, wait 1s

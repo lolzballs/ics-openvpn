@@ -72,8 +72,11 @@ public class DisconnectVPN extends Activity implements DialogInterface.OnClickLi
         VpnProfile lastVPN = ProfileManager.getLastConnectedVpn();
         if (which == DialogInterface.BUTTON_POSITIVE) {
             ProfileManager.setConntectedVpnProfileDisconnected(this);
-            if (mService != null && mService.getManagement() != null)
-                mService.getManagement().stopVPN(false);
+            if (mService != null) {
+                if (mService.getManagement() != null)
+                    mService.getManagement().stopVPN(false);
+                mService.stopTunnels();
+            }
         } else if (which == DialogInterface.BUTTON_NEUTRAL && lastVPN !=null) {
             Intent intent = new Intent(this, LaunchVPN.class);
             intent.putExtra(LaunchVPN.EXTRA_KEY, lastVPN.getUUID().toString());

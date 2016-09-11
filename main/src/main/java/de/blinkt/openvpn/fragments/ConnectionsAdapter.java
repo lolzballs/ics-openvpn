@@ -52,6 +52,7 @@ public class ConnectionsAdapter extends RecyclerView.Adapter<ConnectionsAdapter.
         private final EditText mCustomOptionText;
         private final CheckBox mCustomOptionCB;
         private final View mCustomOptionsLayout;
+        private final CheckBox mSSLTunnelCB;
         private final ImageButton mDeleteButton;
         private final EditText mConnectText;
         private final SeekBar mConnectSlider;
@@ -68,6 +69,7 @@ public class ConnectionsAdapter extends RecyclerView.Adapter<ConnectionsAdapter.
             mCustomOptionText = (EditText) card.findViewById(R.id.customoptions);
             mProtoGroup = (RadioGroup) card.findViewById(R.id.udptcpradiogroup);
             mCustomOptionsLayout = card.findViewById(R.id.custom_options_layout);
+            mSSLTunnelCB = (CheckBox) card.findViewById(R.id.use_ssltunnel);
             mDeleteButton = (ImageButton) card.findViewById(R.id.remove_connection);
             mConnectSlider = (SeekBar) card.findViewById(R.id.connect_silder);
             mConnectText = (EditText) card.findViewById(R.id.connect_timeout);
@@ -116,6 +118,15 @@ public class ConnectionsAdapter extends RecyclerView.Adapter<ConnectionsAdapter.
                     if (mConnection != null) {
                         mConnection.mUseCustomConfig = isChecked;
                         mCustomOptionsLayout.setVisibility(mConnection.mUseCustomConfig ? View.VISIBLE : View.GONE);
+                    }
+                }
+            });
+
+            mSSLTunnelCB.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
+                @Override
+                public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
+                    if (mConnection != null) {
+                        mConnection.mUseSSLTunnel = isChecked;
                     }
                 }
             });
@@ -262,6 +273,7 @@ public class ConnectionsAdapter extends RecyclerView.Adapter<ConnectionsAdapter.
         cH.mCustomOptionText.setText(connection.mCustomConfiguration);
 
         cH.mCustomOptionCB.setChecked(connection.mUseCustomConfig);
+        cH.mSSLTunnelCB.setChecked(connection.mUseSSLTunnel);
         cH.mConnection = connection;
 
     }

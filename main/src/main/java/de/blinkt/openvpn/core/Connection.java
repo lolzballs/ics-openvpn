@@ -15,6 +15,9 @@ public class Connection implements Serializable, Cloneable {
     public boolean mUseUdp = true;
     public String mCustomConfiguration = "";
     public boolean mUseCustomConfig = false;
+    public boolean mUseSSLTunnel = false;
+    public String mTunAddress;
+    public String mTunPort;
     public boolean mEnabled = true;
     public int mConnectTimeout = 0;
     public static final int CONNECTION_DEFAULT_TIMEOUT = 120;
@@ -27,9 +30,15 @@ public class Connection implements Serializable, Cloneable {
 
         // Server Address
         cfg += "remote ";
-        cfg += mServerName;
-        cfg += " ";
-        cfg += mServerPort;
+        if (mUseSSLTunnel) {
+            cfg += mTunAddress;
+            cfg += " ";
+            cfg += mTunPort;
+        } else {
+            cfg += mServerName;
+            cfg += " ";
+            cfg += mServerPort;
+        }
         if (mUseUdp)
             cfg += " udp\n";
         else
