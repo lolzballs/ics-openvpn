@@ -164,10 +164,13 @@ public class VpnProfile implements Serializable, Cloneable {
     public boolean mPushPeerInfo = false;
     public static final boolean mIsOpenVPN22 = false;
 
+    public int mVersion=0;
+
     /* Options no longer used in new profiles */
-    public String mServerName = "openvpn.blinkt.de";
+    public String mServerName = "openvpn.example.com";
     public String mServerPort = "1194";
     public boolean mUseUdp = true;
+
 
     public VpnProfile(String name) {
         mUuid = UUID.randomUUID();
@@ -399,12 +402,16 @@ public class VpnProfile implements Serializable, Cloneable {
         }
 
         if (mUseTLSAuth) {
+            boolean useTlsCrypt = mTLSAuthDirection.equals("tls-crypt");
+
             if (mAuthenticationType == TYPE_STATICKEYS)
                 cfg += insertFileData("secret", mTLSAuthFilename);
+            else if(useTlsCrypt)
+                cfg += insertFileData("tls-crypt", mTLSAuthFilename);
             else
                 cfg += insertFileData("tls-auth", mTLSAuthFilename);
 
-            if (!TextUtils.isEmpty(mTLSAuthDirection)) {
+            if (!TextUtils.isEmpty(mTLSAuthDirection) && !useTlsCrypt) {
                 cfg += "key-direction ";
                 cfg += mTLSAuthDirection;
                 cfg += "\n";
@@ -668,7 +675,7 @@ public class VpnProfile implements Serializable, Cloneable {
 
         Intent intent = new Intent(context, OpenVPNService.class);
         intent.putExtra(prefix + ".profileUUID", mUuid.toString());
-
+        intent.putExtra(prefix + ".profileVersion", mVersion);
         return intent;
     }
 
