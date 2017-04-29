@@ -3,7 +3,7 @@ OpenVPN for Android
 
 Description
 ------------
-With the new VPNService of Android API level 14+ (Ice Cream Sandwhich) it is possible to create a VPN service that does not root access. This project is a port of OpenVPN.
+With the new VPNService of Android API level 14+ (Ice Cream Sandwich) it is possible to create a VPN service that does not need root access. This project is a port of OpenVPN.
 
 Developing
 ---------------
@@ -37,9 +37,9 @@ For example `ca mycafile.pem` becomes
   -----END CERTIFICATE-----
   </ca>
 ```
-Fotnotes
+Footnotes
 -----------
-Please that OpenVPN used by this project is under GPLv2. 
+Please note that OpenVPN used by this project is under GPLv2. 
 
 If you cannot or do not want to use the Play Store you can [download the apk files directly](http://plai.de/android/) . 
 

@@ -153,7 +153,7 @@ public class ExternalOpenVPNService extends Service implements StateListener {
             /* Check if we need to show the confirmation dialog,
              * Check if we need to ask for username/password */
 
-            int neddPassword = vp.needUserPWInput(false);
+            int neddPassword = vp.needUserPWInput(null, null);
 
             if(vpnPermissionIntent != null || neddPassword != 0){
                 Intent shortVPNIntent = new Intent(Intent.ACTION_MAIN);
@@ -198,7 +198,7 @@ public class ExternalOpenVPNService extends Service implements StateListener {
                     throw new RemoteException("The inline file would require user input: " + getString(needpw));
                     */
 
-                ProfileManager.setTemporaryProfile(vp);
+                ProfileManager.setTemporaryProfile(ExternalOpenVPNService.this, vp);
 
                 startProfile(vp);
 
