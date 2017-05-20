@@ -7,6 +7,7 @@ package de.blinkt.openvpn.fragments;
 
 import android.app.ListFragment;
 import android.os.Bundle;
+import android.os.Environment;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.View.OnClickListener;
@@ -133,6 +134,10 @@ public class FileSelectionFragment extends ListFragment {
         getDir(mStartPath);
     }
 
+    public void refresh() {
+        getDir(Environment.getExternalStorageDirectory().getAbsolutePath());
+    }
+
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -153,11 +158,6 @@ public class FileSelectionFragment extends ListFragment {
 
     }
 
-    /**
-     * Monta a estrutura de arquivos e diretorios filhos do diretorio fornecido.
-     *
-     * @param dirPath Diretorio pai.
-     */
     private void getDirImpl(final String dirPath) {
 
         currentPath = dirPath;
@@ -172,6 +172,9 @@ public class FileSelectionFragment extends ListFragment {
             currentPath = ROOT;
             f = new File(currentPath);
             files = f.listFiles();
+
+            if (files == null)
+                files = new File [] {};
         }
 
         myPath.setText(getText(R.string.location) + ": " + currentPath);
