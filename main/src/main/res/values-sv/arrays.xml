@@ -20,6 +20,11 @@
     <item translatable="false">0</item>
     <item translatable="false">1</item>
     <item>Ospecificerad</item>
-    <item>Encryption (tls-crypt)</item>
+    <item>Kryptering (tls-crypt)</item>
+  </string-array>
+  <string-array name="auth_retry_type">
+    <item>Koppla bort, glöm lösenordet</item>
+    <item>Koppla bort, behåll lösenordet</item>
+    <item>Ignorera, försök igen</item>
   </string-array>
 </resources>

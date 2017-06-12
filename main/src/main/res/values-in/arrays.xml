@@ -9,7 +9,7 @@
   <string-array name="vpn_types">
     <item>Sertifikat</item>
     <item>Berkas PKCS1
-2</item>
+20</item>
     <item>Android Certificate</item>
     <item>Nama Pengguna\Sandi</item>
     <item>Kunci Tetap</item>
@@ -22,5 +22,10 @@
     <item translatable="false">1</item>
     <item>Belum ditentukan</item>
     <item>Encryption (tls-crypt)</item>
+  </string-array>
+  <string-array name="auth_retry_type">
+    <item>Disconnect, forget password</item>
+    <item>Disconnect, keep password</item>
+    <item>Abaikan, coba lagi</item>
   </string-array>
 </resources>

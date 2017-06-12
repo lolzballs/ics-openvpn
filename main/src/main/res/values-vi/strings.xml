@@ -251,7 +251,6 @@
   <string name="state_tcp_connect">Đang kết nối (TCP)</string>
   <string name="state_auth_failed">Chứng thực không thành công</string>
   <string name="state_nonetwork">Đang đợi mạng khả dụng</string>
-  <string name="statusline_bytecount">↓%2$s/s %1$s - ↑%4$s/s %3$s</string>
   <string name="notifcation_title_notconnect">Không kết nối</string>
   <string name="start_vpn_title">Đang kết nối VPN %s</string>
   <string name="start_vpn_ticker">Đang kết nối VPN %s</string>
@@ -406,7 +405,6 @@
   <string name="samsung_broken">Even though Samsung phones are among the most selling Android phones, Samsung\'s firmware are also among the most buggy Android firmwares. The bugs are not limited to the VPN operation on these devices but many of them can be workarounded. In the following some of these bugs are described.\n\nDNS does not work unless the DNS server in the VPN range.\n\nOn many Samsung 5.x devices the allowed/disallowed apps feature does not work.\nOn Samsung 6.x VPN is reported not to work unless the VPN app is exempted from Powersave features.</string>
   <string name="samsung_broken_title">Điện thoại Samsung</string>
   <string name="novpn_selected">Không VPN được chọn.</string>
-  <string name="alwaysonvpn">VPN sử dụng khởi động và luôn luôn trênandroid</string>
   <string name="reconnect">Kết nối lại</string>
   <string name="qs_title">Bật tắt VPN</string>
   <string name="qs_connect">Kết nối đến %s</string>

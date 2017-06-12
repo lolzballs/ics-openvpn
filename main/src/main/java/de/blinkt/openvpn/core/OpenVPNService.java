@@ -19,9 +19,9 @@ import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.pm.ShortcutManager;
 import android.content.res.Configuration;
+import android.content.res.Resources;
 import android.net.ConnectivityManager;
 import android.net.VpnService;
-import android.os.Binder;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
@@ -30,7 +30,6 @@ import android.os.IBinder;
 import android.os.Message;
 import android.os.ParcelFileDescriptor;
 import android.os.RemoteException;
-import android.preference.PreferenceManager;
 import android.support.annotation.RequiresApi;
 import android.system.OsConstants;
 import android.text.TextUtils;
@@ -39,7 +38,6 @@ import android.util.SparseArray;
 import android.widget.Toast;
 
 import java.io.IOException;
-import java.lang.ref.WeakReference;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.net.Inet6Address;
@@ -58,6 +56,7 @@ import de.blinkt.openvpn.R;
 import de.blinkt.openvpn.VpnProfile;
 import de.blinkt.openvpn.activities.DisconnectVPN;
 import de.blinkt.openvpn.activities.LogWindow;
+import de.blinkt.openvpn.activities.MainActivity;
 import de.blinkt.openvpn.core.VpnStatus.ByteCountListener;
 import de.blinkt.openvpn.core.VpnStatus.StateListener;
 import de.blinkt.openvpn.core.tunnel.SSLTunnelThread;
@@ -74,6 +73,7 @@ public class OpenVPNService extends VpnService implements StateListener, Callbac
     private static final String PAUSE_VPN = "de.blinkt.openvpn.PAUSE_VPN";
     private static final String RESUME_VPN = "de.blinkt.openvpn.RESUME_VPN";
     private static final int OPENVPN_STATUS = 1;
+    private static final String NOTIFICATION_CHANNEL_ID="openvpn";
     private static boolean mNotificationAlwaysVisible = false;
     private final Vector<String> mDnslist = new Vector<>();
     private final NetworkSpace mRoutes = new NetworkSpace();
@@ -123,19 +123,42 @@ public class OpenVPNService extends VpnService implements StateListener, Callbac
     };
 
     // From: http://stackoverflow.com/questions/3758606/how-to-convert-byte-size-into-human-readable-format-in-java
-    public static String humanReadableByteCount(long bytes, boolean mbit) {
-        if (mbit)
+    public static String humanReadableByteCount(long bytes, boolean speed, Resources res) {
+        if (speed)
             bytes = bytes * 8;
-        int unit = mbit ? 1000 : 1024;
-        if (bytes < unit)
-            return bytes + (mbit ? " bit" : " B");
+        int unit = speed ? 1000 : 1024;
 
-        int exp = (int) (Math.log(bytes) / Math.log(unit));
-        String pre = (mbit ? "kMGTPE" : "KMGTPE").charAt(exp - 1) + (mbit ? "" : "");
-        if (mbit)
-            return String.format(Locale.getDefault(), "%.1f %sbit", bytes / Math.pow(unit, exp), pre);
+
+        int exp = Math.max(0, Math.min((int) (Math.log(bytes) / Math.log(unit)), 3));
+
+        float bytesUnit = Math.round(bytes / Math.pow(unit, exp));
+
+        if (speed)
+            switch (exp) {
+                case 0:
+                    return res.getString(R.string.bits_per_second, bytesUnit);
+                case 1:
+                    return res.getString(R.string.kbits_per_second, bytesUnit);
+                case 2:
+                    return res.getString(R.string.mbits_per_second, bytesUnit);
+                default:
+                    return res.getString(R.string.gbits_per_second, bytesUnit);
+            }
         else
-            return String.format(Locale.getDefault(), "%.1f %sB", bytes / Math.pow(unit, exp), pre);
+            switch (exp) {
+                case 0:
+                    return res.getString(R.string.volume_byte, bytesUnit);
+                case 1:
+                    return res.getString(R.string.volume_kbyte, bytesUnit);
+                case 2:
+                    return res.getString(R.string.volume_mbyte, bytesUnit);
+                default:
+                    return res.getString(R.string.volume_gbyte, bytesUnit);
+
+            }
+
+
+
     }
 
     @Override
@@ -198,7 +221,7 @@ public class OpenVPNService extends VpnService implements StateListener, Callbac
         if (status == LEVEL_WAITING_FOR_USER_INPUT)
             nbuilder.setContentIntent(getUserInputIntent(msg));
         else
-            nbuilder.setContentIntent(getLogPendingIntent());
+            nbuilder.setContentIntent(getGraphPendingIntent());
 
         if (when != 0)
             nbuilder.setWhen(when);
@@ -211,6 +234,9 @@ public class OpenVPNService extends VpnService implements StateListener, Callbac
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP)
             lpNotificationExtras(nbuilder);
+
+        if(Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+            nbuilder.setChannelId(NOTIFICATION_CHANNEL_ID);
 
         if (tickerText != null && !tickerText.equals(""))
             nbuilder.setTicker(tickerText);
@@ -334,13 +360,14 @@ public class OpenVPNService extends VpnService implements StateListener, Callbac
         return pIntent;
     }
 
-    PendingIntent getLogPendingIntent() {
+    PendingIntent getGraphPendingIntent() {
         // Let the configure Button show the Log
-        Class activityClass = LogWindow.class;
+        Class activityClass = MainActivity.class;
         if (mNotificationActivityClass != null) {
             activityClass = mNotificationActivityClass;
         }
         Intent intent = new Intent(getBaseContext(), activityClass);
+        intent.putExtra("PAGE", "graph");
         intent.addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT);
         PendingIntent startLW = PendingIntent.getActivity(this, 0, intent, 0);
         intent.addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT);
@@ -828,7 +855,7 @@ public class OpenVPNService extends VpnService implements StateListener, Callbac
         mLocalIPv6 = null;
         mDomain = null;
 
-        builder.setConfigureIntent(getLogPendingIntent());
+        builder.setConfigureIntent(getGraphPendingIntent());
 
         try {
             //Debug.stopMethodTracing();
@@ -1075,9 +1102,8 @@ public class OpenVPNService extends VpnService implements StateListener, Callbac
             // This also mean we are no longer connected, ignore bytecount messages until next
             // CONNECTED
             // Does not work :(
-            String msg = getString(resid);
             showNotification(VpnStatus.getLastCleanLogMessage(this),
-                    msg, priority, 0, level);
+                    VpnStatus.getLastCleanLogMessage(this), priority, 0, level);
 
         }
     }
@@ -1098,10 +1124,10 @@ public class OpenVPNService extends VpnService implements StateListener, Callbac
     public void updateByteCount(long in, long out, long diffIn, long diffOut) {
         if (mDisplayBytecount) {
             String netstat = String.format(getString(R.string.statusline_bytecount),
-                    humanReadableByteCount(in, false),
-                    humanReadableByteCount(diffIn / OpenVPNManagement.mBytecountInterval, true),
-                    humanReadableByteCount(out, false),
-                    humanReadableByteCount(diffOut / OpenVPNManagement.mBytecountInterval, true));
+                    humanReadableByteCount(in, false, getResources()),
+                    humanReadableByteCount(diffIn / OpenVPNManagement.mBytecountInterval, true, getResources()),
+                    humanReadableByteCount(out, false, getResources()),
+                    humanReadableByteCount(diffOut / OpenVPNManagement.mBytecountInterval, true, getResources()));
 
             int priority = mNotificationAlwaysVisible ? PRIORITY_DEFAULT : PRIORITY_MIN;
             showNotification(netstat, null, priority, mConnecttime, LEVEL_CONNECTED);
