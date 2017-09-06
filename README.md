@@ -1,5 +1,6 @@
 OpenVPN for Android
 =============
+[![Build Status](https://travis-ci.org/schwabe/ics-openvpn.svg?branch=master)](https://travis-ci.org/schwabe/ics-openvpn)
 
 Description
 ------------
@@ -48,8 +49,7 @@ Please note that OpenVPN used by this project is under GPLv2.
 
 If you cannot or do not want to use the Play Store you can [download the apk files directly](http://plai.de/android/) . 
 
-If you want to donate you can donate to [arne-paypal@rfc2549.org via paypal](https://www.paypal.com/cgi-bin/webscr?hosted_button_id=R2M6ZP9AF25LS&cmd=_s-xclick).
-
+If you want to donate you can donate to [arne-paypal@rfc2549.org via paypal](https://www.paypal.com/cgi-bin/webscr?hosted_button_id=R2M6ZP9AF25LS&cmd=_s-xclick), or alternatively if you believe in fancy Internet money you can use Bitcoin: 1EgjL1YQYS4V2TR4GuJtX1chmVCsZHDqSQ
 
 The old official or main repository was a Mercurial (hg) repository at http://code.google.com/p/ics-openvpn/source/
 
