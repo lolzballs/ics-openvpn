@@ -1,4 +1,12 @@
 cmake_minimum_required(VERSION 3.4.1)
+# Git version string
+
+include(GetGitRevisionDescription.cmake)
+git_describe(OPENVPN2_GIT "${CMAKE_CURRENT_SOURCE_DIR}/openvpn" "--tags" "--always" "--long")
+git_describe(OPENVPN3_GIT "${CMAKE_CURRENT_SOURCE_DIR}/openvpn3" "--tags" "--always" "--long")
+message ("OpenVPN 2.x version ${OPENVPN2_GIT}")
+message ("OpenVPN 3.x version ${OPENVPN3_GIT}")
+
 
 # Set mbedtls options
 OPTION(ENABLE_PROGRAMS "" OFF)
@@ -12,15 +20,32 @@ include(openssl.cmake)
 
 # Super hacky way to determine flavour
 #-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=/Users/arne/software/icsopenvpn/main/build/intermediates/cmake/normal/debug/obj/arm64-v8a
-if (${CMAKE_LIBRARY_OUTPUT_DIRECTORY} MATCHES "build/intermediates/cmake/.*ovpn3.*/")
+if (NOT ${CMAKE_LIBRARY_OUTPUT_DIRECTORY} MATCHES "build/intermediates/cmake/.*noovpn3.*/")
+    FIND_PACKAGE(SWIG 3.0)
+
     add_subdirectory(mbedtls)
-    add_custom_command(OUTPUT "javacli/ovpncli_wrap.cxx"
-      file(MAKE_DIRECTORY ovpn3/java/net/openvpn/ovpn3)
-      COMMAND swig -outdir ovpn3/java/net/openvpn/ovpn3/ -c++ -java -package net.openvpn.ovpn3 -I${CMAKE_SOURCE_DIR}/openvpn3/client -I${CMAKE_SOURCE_DIR}/openvpn3 ${CMAKE_SOURCE_DIR}/openvpn3/javacli/ovpncli.i)
+    add_custom_command(OUTPUT "ovpncli_wrap.cxx"
+      COMMAND ${CMAKE_COMMAND} -E make_directory ovpn3
+      COMMAND ${SWIG_EXECUTABLE}  -outdir ovpn3
+                    -c++
+                    -java -package net.openvpn.ovpn3
+                    -outcurrentdir
+                    -I${CMAKE_SOURCE_DIR}/openvpn3/client
+                    -I${CMAKE_SOURCE_DIR}/openvpn3
+                     ${CMAKE_SOURCE_DIR}/openvpn3/javacli/ovpncli.i)
+
+
+    # proper way bunt unfinished
+    #INCLUDE(${SWIG_USE_FILE})
+    #SET_SOURCE_FILES_PROPERTIES(openvpn3/javacli/ovpncli.i PROPERTIES SWIG_FLAGS "-package net.openvpn.ovpn3")
+    #SET_SOURCE_FILES_PROPERTIES(openvpn3/javacli/ovpncli.i PROPERTIES CPLUSPLUS ON)
+    #SWIG_ADD_MODULE(ovpen3cli java openvpn3/javacli/ovpncli.i)
+
+
 
     set(ovpn3_SRCS
       openvpn3/client/ovpncli.cpp
-      openvpn3/javacli/ovpncli_wrap.cxx)
+      ovpncli_wrap.cxx)
 
     add_library(ovpn3 SHARED ${ovpn3_SRCS})
 
@@ -39,8 +64,10 @@ if (${CMAKE_LIBRARY_OUTPUT_DIRECTORY} MATCHES "build/intermediates/cmake/.*ovpn3
       -DASIO_STANDALONE
       -DUSE_ASIO
       -DUSE_MBEDTLS
+      -DGIT_VERSION_STRING=\"${OPENVPN3_GIT}\"
+      -DNO_ROUTE_EXCLUDE_EMULATION
       )
-    target_link_libraries(ovpn3 mbedtls mbedx509 mbedcrypto lzo_static_lib)
+    target_link_libraries(ovpn3 mbedtls mbedx509 mbedcrypto lzo)
 else()
     message ("Not budiling OpenVPN for output dir ${CMAKE_LIBRARY_OUTPUT_DIRECTORY}")
 endif()
@@ -49,11 +76,10 @@ add_library(opvpnutil SHARED opvpnutil/jniglue.c opvpnutil/scan_ifs.c opvpnutil/
 target_compile_definitions(opvpnutil PRIVATE -DTARGET_ARCH_ABI=\"${ANDROID_ABI}\")
 target_link_libraries(opvpnutil log crypto ssl)
 
-
+# The magic Jellybean keystore signing hack. Beware dragons and dlsyms magic ahead
 add_library(jbcrypto SHARED jbcrypto/jbcrypto.cpp)
-target_link_libraries(jbcrypto log crypto)
-
-
+target_link_libraries(jbcrypto log dl)
+target_compile_options(jbcrypto PRIVATE)
 
 set(openvpn_srcs
 	src/compat/compat-basename.c 
@@ -75,7 +101,8 @@ set(openvpn_srcs
 	src/openvpn/cryptoapi.c 
 	src/openvpn/dhcp.c 
 	src/openvpn/error.c 
-	src/openvpn/event.c 
+	src/openvpn/event.c
+	src/openvpn/env_set.c
 	src/openvpn/fdmisc.c 
 	src/openvpn/forward.c 
 	src/openvpn/fragment.c 
@@ -135,14 +162,12 @@ set(openvpn_srcs
 	src/openvpn/comp-lz4.c 
 	src/openvpn/comp.c 
 	src/openvpn/compstub.c 
-	src/openvpn/env_set.c  
-	src/openvpn/run_command.c
     )
 
 PREPEND(openvpn_srcs_with_path "openvpn" ${openvpn_srcs})  
 add_library(openvpn SHARED ${openvpn_srcs_with_path})
 target_include_directories(openvpn PRIVATE
-  openvpn/android-config/
+  openvpn-config
   openvpn/src/compat
   openvpn/include
   lzo/include
@@ -151,13 +176,15 @@ target_include_directories(openvpn PRIVATE
 
 target_compile_definitions(openvpn PRIVATE
   -DHAVE_CONFIG_H
+  -DCONFIGURE_GIT_REVISION=\"${OPENVPN2_GIT}\"
+  -DCONFIGURE_GIT_FLAGS=\"\"
   -DTARGET_ABI=\"${ANDROID_ABI}\"
   )
 
 target_compile_definitions(openvpn PRIVATE
   -DENABLE_CRYPTO_OPENSSL=1
   )
-target_link_libraries(openvpn crypto ssl lzo_static_lib)
+target_link_libraries(openvpn crypto ssl lzo)
 
 add_executable(pie_openvpn.${ANDROID_ABI} minivpn/minivpn.c)
 target_compile_options(pie_openvpn.${ANDROID_ABI} PRIVATE -fPIE)
@@ -170,7 +197,7 @@ target_link_libraries(nopie_openvpn.${ANDROID_ABI} PRIVATE openvpn)
 SET(OVPN_ASSET_DIR ${CMAKE_SOURCE_DIR}/../../../build/ovpnassets)
 
 add_custom_target(makeassetdir ALL
-    COMMAND ${CMAKE_COMMAND} -E make_directory MAKE_DIRECTORY ${OVPN_ASSET_DIR})
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${OVPN_ASSET_DIR})
 
 add_custom_command(TARGET nopie_openvpn.${ANDROID_ABI} POST_BUILD
   COMMAND

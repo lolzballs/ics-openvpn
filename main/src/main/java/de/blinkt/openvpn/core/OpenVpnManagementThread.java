@@ -6,13 +6,13 @@
 package de.blinkt.openvpn.core;
 
 import android.content.Context;
+import android.content.Intent;
 import android.net.LocalServerSocket;
 import android.net.LocalSocket;
 import android.net.LocalSocketAddress;
 import android.os.Handler;
 import android.os.ParcelFileDescriptor;
 import android.support.annotation.NonNull;
-import android.text.TextUtils;
 import android.util.Log;
 
 import junit.framework.Assert;
@@ -36,7 +36,9 @@ import de.blinkt.openvpn.VpnProfile;
 
 public class OpenVpnManagementThread implements Runnable, OpenVPNManagement {
 
+    public static final int ORBOT_TIMEOUT_MS = 20 * 1000;
     private static final String TAG = "openvpn";
+    private static final Vector<OpenVpnManagementThread> active = new Vector<>();
     private final Handler mResumeHandler;
     private LocalSocket mSocket;
     private VpnProfile mProfile;
@@ -45,13 +47,54 @@ public class OpenVpnManagementThread implements Runnable, OpenVPNManagement {
     private LocalServerSocket mServerSocket;
     private boolean mWaitingForRelease = false;
     private long mLastHoldRelease = 0;
-
-    private static final Vector<OpenVpnManagementThread> active = new Vector<>();
     private LocalSocket mServerSocketLocal;
 
     private pauseReason lastPauseReason = pauseReason.noNetwork;
     private PausedStateCallback mPauseCallback;
     private boolean mShuttingDown;
+    private Runnable mResumeHoldRunnable = () -> {
+        if (shouldBeRunning()) {
+            releaseHoldCmd();
+        }
+    };
+    private Runnable orbotStatusTimeOutRunnable = new Runnable() {
+        @Override
+        public void run() {
+            sendProxyCMD(Connection.ProxyType.SOCKS5, "127.0.0.1", Integer.toString(OrbotHelper.SOCKS_PROXY_PORT_DEFAULT));
+            OrbotHelper.get(mOpenVPNService).removeStatusCallback(statusCallback);
+
+        }
+    };
+    private OrbotHelper.StatusCallback statusCallback = new OrbotHelper.StatusCallback() {
+
+        @Override
+        public void onStatus(Intent statusIntent) {
+            StringBuilder extras = new StringBuilder();
+            for (String key : statusIntent.getExtras().keySet()) {
+                Object val = statusIntent.getExtras().get(key);
+
+                extras.append(String.format(Locale.ENGLISH, "%s - '%s'", key, val == null ? "null" : val.toString()));
+            }
+            VpnStatus.logDebug("Got Orbot status: " + extras);
+        }
+
+        @Override
+        public void onNotYetInstalled() {
+            VpnStatus.logDebug("Orbot not yet installed");
+        }
+
+        @Override
+        public void onOrbotReady(Intent intent, String socksHost, int socksPort) {
+            mResumeHandler.removeCallbacks(orbotStatusTimeOutRunnable);
+            sendProxyCMD(Connection.ProxyType.SOCKS5, socksHost, Integer.toString(socksPort));
+            OrbotHelper.get(mOpenVPNService).removeStatusCallback(this);
+        }
+
+        @Override
+        public void onDisabled(Intent intent) {
+            VpnStatus.logWarning("Orbot integration for external applications is disabled. Waiting %ds before connecting to the default port. Enable external app integration in Orbot or use Socks v5 config instead of Orbot to avoid this delay.");
+        }
+    };
 
     public OpenVpnManagementThread(VpnProfile profile, OpenVPNService openVpnService) {
         mProfile = profile;
@@ -60,14 +103,21 @@ public class OpenVpnManagementThread implements Runnable, OpenVPNManagement {
 
     }
 
-    private Runnable mResumeHoldRunnable = new Runnable() {
-        @Override
-        public void run() {
-            if (shouldBeRunning()) {
-                releaseHoldCmd();
+    private static boolean stopOpenVPN() {
+        synchronized (active) {
+            boolean sendCMD = false;
+            for (OpenVpnManagementThread mt : active) {
+                sendCMD = mt.managmentCommand("signal SIGINT\n");
+                try {
+                    if (mt.mSocket != null)
+                        mt.mSocket.close();
+                } catch (IOException e) {
+                    // Ignore close error on already closed socket
+                }
             }
+            return sendCMD;
         }
-    };
+    }
 
     public boolean openManagementInterface(@NonNull Context c) {
         // Could take a while to open connection
@@ -122,7 +172,6 @@ public class OpenVpnManagementThread implements Runnable, OpenVPNManagement {
         return false;
     }
 
-
     @Override
     public void run() {
         byte[] buffer = new byte[2048];
@@ -148,6 +197,7 @@ public class OpenVpnManagementThread implements Runnable, OpenVPNManagement {
 
             // Closing one of the two sockets also closes the other
             //mServerSocketLocal.close();
+            managmentCommand("version 2\n");
 
             while (true) {
 
@@ -222,7 +272,6 @@ public class OpenVpnManagementThread implements Runnable, OpenVPNManagement {
         return pendingInput;
     }
 
-
     private void processCommand(String command) {
         //Log.i(TAG, "Line from managment" + command);
 
@@ -259,7 +308,7 @@ public class OpenVpnManagementThread implements Runnable, OpenVPNManagement {
                 case "LOG":
                     processLogMessage(argument);
                     break;
-                case "RSA_SIGN":
+                case "PK_SIGN":
                     processSignCommand(argument);
                     break;
                 default:
@@ -366,7 +415,6 @@ public class OpenVpnManagementThread implements Runnable, OpenVPNManagement {
         //managmentCommand("log on all\n");
     }
 
-
     public void releaseHold() {
         if (mWaitingForRelease)
             releaseHoldCmd();
@@ -374,27 +422,71 @@ public class OpenVpnManagementThread implements Runnable, OpenVPNManagement {
 
     private void processProxyCMD(String argument) {
         String[] args = argument.split(",", 3);
-        SocketAddress proxyaddr = ProxyDetection.detectProxy(mProfile);
 
+        Connection.ProxyType proxyType = Connection.ProxyType.NONE;
 
-        if (args.length >= 2) {
-            String proto = args[1];
-            if (proto.equals("UDP")) {
-                proxyaddr = null;
+        int connectionEntryNumber = Integer.parseInt(args[0]) - 1;
+        String proxyport = null;
+        String proxyname = null;
+
+        if (mProfile.mConnections.length > connectionEntryNumber) {
+            Connection connection = mProfile.mConnections[connectionEntryNumber];
+            proxyType = connection.mProxyType;
+            proxyname = connection.mProxyName;
+            proxyport = connection.mProxyPort;
+        } else {
+            VpnStatus.logError(String.format(Locale.ENGLISH, "OpenVPN is asking for a proxy of an unknonwn connection entry (%d)", connectionEntryNumber));
+        }
+
+        // atuo detection of proxy
+        if (proxyType == Connection.ProxyType.NONE) {
+            SocketAddress proxyaddr = ProxyDetection.detectProxy(mProfile);
+            if (proxyaddr instanceof InetSocketAddress) {
+                InetSocketAddress isa = (InetSocketAddress) proxyaddr;
+                proxyType = Connection.ProxyType.HTTP;
+                proxyname = isa.getHostName();
+                proxyport = String.valueOf(isa.getPort());
             }
         }
 
-        if (proxyaddr instanceof InetSocketAddress) {
-            InetSocketAddress isa = (InetSocketAddress) proxyaddr;
 
-            VpnStatus.logInfo(R.string.using_proxy, isa.getHostName(), isa.getPort());
+        if (args.length >= 2 && proxyType == Connection.ProxyType.HTTP) {
+            String proto = args[1];
+            if (proto.equals("UDP")) {
+                proxyname = null;
+                VpnStatus.logInfo("Not using an HTTP proxy since the connection uses UDP");
+            }
+        }
 
-            String proxycmd = String.format(Locale.ENGLISH, "proxy HTTP %s %d\n", isa.getHostName(), isa.getPort());
+
+        if (proxyType == Connection.ProxyType.ORBOT) {
+            VpnStatus.updateStateString("WAIT_ORBOT", "Waiting for Orbot to start", R.string.state_waitorbot, ConnectionStatus.LEVEL_CONNECTING_NO_SERVER_REPLY_YET);
+            OrbotHelper orbotHelper = OrbotHelper.get(mOpenVPNService);
+            if (!orbotHelper.checkTorReceier(mOpenVPNService))
+                VpnStatus.logError("Orbot does not seem to be installed!");
+
+            mResumeHandler.postDelayed(orbotStatusTimeOutRunnable, ORBOT_TIMEOUT_MS);
+            orbotHelper.addStatusCallback(mOpenVPNService, statusCallback);
+
+            orbotHelper.sendOrbotStartAndStatusBroadcast();
+
+        } else {
+            sendProxyCMD(proxyType, proxyname, proxyport);
+        }
+    }
+
+    private void sendProxyCMD(Connection.ProxyType proxyType, String proxyname, String proxyport) {
+        if (proxyType != Connection.ProxyType.NONE && proxyname != null) {
+
+            VpnStatus.logInfo(R.string.using_proxy, proxyname, proxyname);
+
+            String proxycmd = String.format(Locale.ENGLISH, "proxy %s %s %s\n",
+                    proxyType == Connection.ProxyType.HTTP ? "HTTP" : "SOCKS",
+                    proxyname, proxyport);
             managmentCommand(proxycmd);
         } else {
             managmentCommand("proxy NONE\n");
         }
-
     }
 
     private void processState(String argument) {
@@ -407,7 +499,6 @@ public class OpenVpnManagementThread implements Runnable, OpenVPNManagement {
             VpnStatus.updateStateString(currentstate, args[2]);
     }
 
-
     private void processByteCount(String argument) {
         //   >BYTECOUNT:{BYTES_IN},{BYTES_OUT}
         int comma = argument.indexOf(',');
@@ -417,7 +508,6 @@ public class OpenVpnManagementThread implements Runnable, OpenVPNManagement {
         VpnStatus.updateByteCount(in, out);
 
     }
-
 
     private void processNeedCommand(String argument) {
         int p1 = argument.indexOf('\'');
@@ -545,6 +635,10 @@ public class OpenVpnManagementThread implements Runnable, OpenVPNManagement {
 
 
         try {
+            // Ignore Auth token message, already managed by openvpn itself
+            if (argument.startsWith("Auth-Token:")) {
+                return;
+            }
 
             int p1 = argument.indexOf('\'');
             int p2 = argument.indexOf('\'', p1 + 1);
@@ -579,26 +673,8 @@ public class OpenVpnManagementThread implements Runnable, OpenVPNManagement {
 
     }
 
-
     private void proccessPWFailed(String needed, String args) {
         VpnStatus.updateStateString("AUTH_FAILED", needed + args, R.string.state_auth_failed, ConnectionStatus.LEVEL_AUTH_FAILED);
-    }
-
-
-    private static boolean stopOpenVPN() {
-        synchronized (active) {
-            boolean sendCMD = false;
-            for (OpenVpnManagementThread mt : active) {
-                sendCMD = mt.managmentCommand("signal SIGINT\n");
-                try {
-                    if (mt.mSocket != null)
-                        mt.mSocket.close();
-                } catch (IOException e) {
-                    // Ignore close error on already closed socket
-                }
-            }
-            return sendCMD;
-        }
     }
 
     @Override
@@ -606,7 +682,7 @@ public class OpenVpnManagementThread implements Runnable, OpenVPNManagement {
         if (mWaitingForRelease)
             releaseHold();
         else if (samenetwork)
-            managmentCommand("network-change\n");
+            managmentCommand("network-change samenetwork\n");
         else
             managmentCommand("network-change\n");
     }
@@ -634,13 +710,14 @@ public class OpenVpnManagementThread implements Runnable, OpenVPNManagement {
     private void processSignCommand(String b64data) {
 
         String signed_string = mProfile.getSignedData(b64data);
+
         if (signed_string == null) {
-            managmentCommand("rsa-sig\n");
+            managmentCommand("pk-sig\n");
             managmentCommand("\nEND\n");
             stopOpenVPN();
             return;
         }
-        managmentCommand("rsa-sig\n");
+        managmentCommand("pk-sig\n");
         managmentCommand(signed_string);
         managmentCommand("\nEND\n");
     }
