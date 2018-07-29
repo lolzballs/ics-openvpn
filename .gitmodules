@@ -1,15 +1,15 @@
 [submodule "main/openvpn"]
 	path = main/src/main/cpp/openvpn
-	url = https://github.com/schwabe/openvpn.git
+	url = ../../schwabe/openvpn.git
 [submodule "main/openssl"]
 	path = main/src/main/cpp/openssl
-	url = https://github.com/schwabe/platform_external_openssl.git
+	url = ../../schwabe/platform_external_openssl.git
 [submodule "main/src/main/cpp/mbedtls"]
 	path = main/src/main/cpp/mbedtls
-	url = ,,/../ARMmbed/mbedtls.git
+	url = ../../ARMmbed/mbedtls.git
 [submodule "main/src/main/cpp/openvpn3"]
 	path = main/src/main/cpp/openvpn3
-	url = https://github.com/schwabe/openvpn3.git
+	url = ../../schwabe/openvpn3.git
 [submodule "main/src/main/cpp/asio"]
 	path = main/src/main/cpp/asio
 	url = ../../chriskohlhoff/asio/
