@@ -10,12 +10,16 @@ import android.content.Intent;
 import android.net.LocalServerSocket;
 import android.net.LocalSocket;
 import android.net.LocalSocketAddress;
+import android.os.Build;
 import android.os.Handler;
 import android.os.ParcelFileDescriptor;
 import android.support.annotation.NonNull;
+import android.support.annotation.RequiresApi;
+import android.system.ErrnoException;
+import android.system.Os;
 import android.util.Log;
-
-import junit.framework.Assert;
+import de.blinkt.openvpn.R;
+import de.blinkt.openvpn.VpnProfile;
 
 import java.io.FileDescriptor;
 import java.io.IOException;
@@ -24,15 +28,7 @@ import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.LinkedList;
-import java.util.Locale;
-import java.util.Vector;
-
-import de.blinkt.openvpn.BuildConfig;
-import de.blinkt.openvpn.R;
-import de.blinkt.openvpn.VpnProfile;
+import java.util.*;
 
 public class OpenVpnManagementThread implements Runnable, OpenVPNManagement {
 
@@ -60,7 +56,7 @@ public class OpenVpnManagementThread implements Runnable, OpenVPNManagement {
     private Runnable orbotStatusTimeOutRunnable = new Runnable() {
         @Override
         public void run() {
-            sendProxyCMD(Connection.ProxyType.SOCKS5, "127.0.0.1", Integer.toString(OrbotHelper.SOCKS_PROXY_PORT_DEFAULT));
+            sendProxyCMD(Connection.ProxyType.SOCKS5, "127.0.0.1", Integer.toString(OrbotHelper.SOCKS_PROXY_PORT_DEFAULT), false);
             OrbotHelper.get(mOpenVPNService).removeStatusCallback(statusCallback);
 
         }
@@ -86,7 +82,7 @@ public class OpenVpnManagementThread implements Runnable, OpenVPNManagement {
         @Override
         public void onOrbotReady(Intent intent, String socksHost, int socksPort) {
             mResumeHandler.removeCallbacks(orbotStatusTimeOutRunnable);
-            sendProxyCMD(Connection.ProxyType.SOCKS5, socksHost, Integer.toString(socksPort));
+            sendProxyCMD(Connection.ProxyType.SOCKS5, socksHost, Integer.toString(socksPort), false);
             OrbotHelper.get(mOpenVPNService).removeStatusCallback(this);
         }
 
@@ -95,6 +91,7 @@ public class OpenVpnManagementThread implements Runnable, OpenVPNManagement {
             VpnStatus.logWarning("Orbot integration for external applications is disabled. Waiting %ds before connecting to the default port. Enable external app integration in Orbot or use Socks v5 config instead of Orbot to avoid this delay.");
         }
     };
+    private transient Connection mCurrentProxyConnection;
 
     public OpenVpnManagementThread(VpnProfile profile, OpenVPNService openVpnService) {
         mProfile = profile;
@@ -247,14 +244,27 @@ public class OpenVpnManagementThread implements Runnable, OpenVPNManagement {
 
             //ParcelFileDescriptor pfd = ParcelFileDescriptor.fromFd(fdint);
             //pfd.close();
-            NativeUtils.jniclose(fdint);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                fdCloseLollipop(fd);
+            } else {
+                NativeUtils.jniclose(fdint);
+            }
             return;
-        } catch (NoSuchMethodException | IllegalArgumentException | InvocationTargetException | IllegalAccessException | NullPointerException e) {
+        } catch ( NoSuchMethodException | IllegalArgumentException | InvocationTargetException | IllegalAccessException | NullPointerException e) {
             VpnStatus.logException("Failed to retrieve fd from socket (" + fd + ")", e);
         }
 
         Log.d("Openvpn", "Failed to retrieve fd from socket: " + fd);
 
+    }
+
+    @RequiresApi(api = Build.VERSION_CODES.LOLLIPOP)
+    private void fdCloseLollipop(FileDescriptor fd) {
+        try {
+            Os.close(fd);
+        } catch (Exception e) {
+            VpnStatus.logException("Failed to close fd (" + fd + ")", e);
+        }
     }
 
     private String processInput(String pendingInput) {
@@ -274,7 +284,6 @@ public class OpenVpnManagementThread implements Runnable, OpenVPNManagement {
 
     private void processCommand(String command) {
         //Log.i(TAG, "Line from managment" + command);
-
 
         if (command.startsWith(">") && command.contains(":")) {
             String[] parts = command.split(":", 2);
@@ -311,6 +320,9 @@ public class OpenVpnManagementThread implements Runnable, OpenVPNManagement {
                 case "PK_SIGN":
                     processSignCommand(argument);
                     break;
+                case "INFOMSG":
+                    processInfoMessage(argument);
+                    break;
                 default:
                     VpnStatus.logWarning("MGMT: Got unrecognized command" + command);
                     Log.i(TAG, "Got unrecognized command" + command);
@@ -326,6 +338,14 @@ public class OpenVpnManagementThread implements Runnable, OpenVPNManagement {
         } else {
             Log.i(TAG, "Got unrecognized line from managment" + command);
             VpnStatus.logWarning("MGMT: Got unrecognized line from management:" + command);
+        }
+    }
+
+    private void processInfoMessage(String info)
+    {
+        if (info.startsWith("OPEN_URL:"))
+        {
+            mOpenVPNService.trigger_url_open(info);
         }
     }
 
@@ -428,14 +448,20 @@ public class OpenVpnManagementThread implements Runnable, OpenVPNManagement {
         int connectionEntryNumber = Integer.parseInt(args[0]) - 1;
         String proxyport = null;
         String proxyname = null;
+        boolean proxyUseAuth = false;
 
         if (mProfile.mConnections.length > connectionEntryNumber) {
             Connection connection = mProfile.mConnections[connectionEntryNumber];
             proxyType = connection.mProxyType;
             proxyname = connection.mProxyName;
             proxyport = connection.mProxyPort;
+            proxyUseAuth = connection.mUseProxyAuth;
+
+            // Use transient variable to remember http user/password
+            mCurrentProxyConnection = connection;
+
         } else {
-            VpnStatus.logError(String.format(Locale.ENGLISH, "OpenVPN is asking for a proxy of an unknonwn connection entry (%d)", connectionEntryNumber));
+            VpnStatus.logError(String.format(Locale.ENGLISH, "OpenVPN is asking for a proxy of an unknown connection entry (%d)", connectionEntryNumber));
         }
 
         // atuo detection of proxy
@@ -446,6 +472,8 @@ public class OpenVpnManagementThread implements Runnable, OpenVPNManagement {
                 proxyType = Connection.ProxyType.HTTP;
                 proxyname = isa.getHostName();
                 proxyport = String.valueOf(isa.getPort());
+                proxyUseAuth = false;
+
             }
         }
 
@@ -471,18 +499,20 @@ public class OpenVpnManagementThread implements Runnable, OpenVPNManagement {
             orbotHelper.sendOrbotStartAndStatusBroadcast();
 
         } else {
-            sendProxyCMD(proxyType, proxyname, proxyport);
+            sendProxyCMD(proxyType, proxyname, proxyport, proxyUseAuth);
         }
     }
 
-    private void sendProxyCMD(Connection.ProxyType proxyType, String proxyname, String proxyport) {
+    private void sendProxyCMD(Connection.ProxyType proxyType, String proxyname, String proxyport, boolean usePwAuth) {
         if (proxyType != Connection.ProxyType.NONE && proxyname != null) {
 
             VpnStatus.logInfo(R.string.using_proxy, proxyname, proxyname);
 
-            String proxycmd = String.format(Locale.ENGLISH, "proxy %s %s %s\n",
+            String pwstr =  usePwAuth ? " auto" : "";
+
+            String proxycmd = String.format(Locale.ENGLISH, "proxy %s %s %s%s\n",
                     proxyType == Connection.ProxyType.HTTP ? "HTTP" : "SOCKS",
-                    proxyname, proxyport);
+                    proxyname, proxyport, pwstr);
             managmentCommand(proxycmd);
         } else {
             managmentCommand("proxy NONE\n");
@@ -541,7 +571,8 @@ public class OpenVpnManagementThread implements Runnable, OpenVPNManagement {
             */
 
                 if (routeparts.length == 5) {
-                    if (BuildConfig.DEBUG) Assert.assertEquals("dev", routeparts[3]);
+                    //if (BuildConfig.DEBUG)
+                    //                assertEquals("dev", routeparts[3]);
                     mOpenVPNService.addRoute(routeparts[0], routeparts[1], routeparts[2], routeparts[4]);
                 } else if (routeparts.length >= 3) {
                     mOpenVPNService.addRoute(routeparts[0], routeparts[1], routeparts[2], null);
@@ -562,8 +593,10 @@ public class OpenVpnManagementThread implements Runnable, OpenVPNManagement {
                 mOpenVPNService.setLocalIP(ifconfigparts[0], ifconfigparts[1], mtu, ifconfigparts[3]);
                 break;
             case "IFCONFIG6":
-                mOpenVPNService.setLocalIPv6(extra);
-
+                String[] ifconfig6parts = extra.split(" ");
+                mtu = Integer.parseInt(ifconfig6parts[1]);
+                mOpenVPNService.setMtu(mtu);
+                mOpenVPNService.setLocalIPv6(ifconfig6parts[0]);
                 break;
             case "PERSIST_TUN_ACTION":
                 // check if tun cfg stayed the same
@@ -653,17 +686,26 @@ public class OpenVpnManagementThread implements Runnable, OpenVPNManagement {
         }
 
         String pw = null;
+        String username = null;
 
         if (needed.equals("Private Key")) {
             pw = mProfile.getPasswordPrivateKey();
         } else if (needed.equals("Auth")) {
             pw = mProfile.getPasswordAuth();
+            username = mProfile.mUsername;
 
-            String usercmd = String.format("username '%s' %s\n",
-                    needed, VpnProfile.openVpnEscape(mProfile.mUsername));
-            managmentCommand(usercmd);
+        } else if (needed.equals("HTTP Proxy")) {
+            if( mCurrentProxyConnection != null) {
+                pw = mCurrentProxyConnection.mProxyAuthPassword;
+                username = mCurrentProxyConnection.mProxyAuthUser;
+            }
         }
         if (pw != null) {
+            if (username !=null) {
+                String usercmd = String.format("username '%s' %s\n",
+                        needed, VpnProfile.openVpnEscape(username));
+                managmentCommand(usercmd);
+            }
             String cmd = String.format("password '%s' %s\n", needed, VpnProfile.openVpnEscape(pw));
             managmentCommand(cmd);
         } else {

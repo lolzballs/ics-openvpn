@@ -16,12 +16,13 @@ OPTION(ENABLE_TESTING ""  OFF)
 #add_subdirectory(lzo)
 include(tools.cmake)
 include(lzo.cmake)
+include(lz4.cmake)
 include(openssl.cmake)
 
 # Super hacky way to determine flavour
 #-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=/Users/arne/software/icsopenvpn/main/build/intermediates/cmake/normal/debug/obj/arm64-v8a
 if (NOT ${CMAKE_LIBRARY_OUTPUT_DIRECTORY} MATCHES "build/intermediates/cmake/.*noovpn3.*/")
-    FIND_PACKAGE(SWIG 3.0)
+    FIND_PACKAGE(SWIG 3.0 REQUIRED)
 
     add_subdirectory(mbedtls)
     add_custom_command(OUTPUT "ovpncli_wrap.cxx"
@@ -61,13 +62,15 @@ if (NOT ${CMAKE_LIBRARY_OUTPUT_DIRECTORY} MATCHES "build/intermediates/cmake/.*n
     target_compile_definitions(ovpn3 PRIVATE
       -DHAVE_CONFIG_H
       -DHAVE_LZO
+      -DHAVE_LZ4
       -DASIO_STANDALONE
       -DUSE_ASIO
       -DUSE_MBEDTLS
       -DGIT_VERSION_STRING=\"${OPENVPN3_GIT}\"
       -DNO_ROUTE_EXCLUDE_EMULATION
+      -DOPENVPN_SHOW_SESSION_TOKEN
       )
-    target_link_libraries(ovpn3 mbedtls mbedx509 mbedcrypto lzo)
+    target_link_libraries(ovpn3 mbedtls mbedx509 mbedcrypto lzo lz4)
 else()
     message ("Not budiling OpenVPN for output dir ${CMAKE_LIBRARY_OUTPUT_DIRECTORY}")
 endif()
@@ -143,7 +146,8 @@ set(openvpn_srcs
 	src/openvpn/ps.c 
 	src/openvpn/push.c 
 	src/openvpn/reliable.c 
-	src/openvpn/route.c 
+	src/openvpn/route.c
+	src/openvpn/run_command.c
 	src/openvpn/schedule.c 
 	src/openvpn/session_id.c 
 	src/openvpn/shaper.c 
